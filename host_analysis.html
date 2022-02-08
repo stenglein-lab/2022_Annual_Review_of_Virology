@@ -377,7 +377,15 @@ summary {
 <p><a href="https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/">NCBI Virus</a> is “is a community portal for viral sequence data”. It is described in <a href="https://pubmed.ncbi.nlm.nih.gov/27899678/">this paper</a>. Through this portal it is possible to download virus sequences or metadata about virus sequences. I downloaded all available metadata for all available virus nucleotide sequences.</p>
 <p>Below are the steps I took to download this metadata. This produced a file of 2.2 Gb, which is too large to upload to the <a href="https://github.com/stenglein-lab/2022_Annual_Review_of_Virology">GitHub repository</a> for this analysis.<br />
 If you want to reproduce or update this analysis, you will have to follow these steps to download a copy of this metadata for yourself.</p>
-<p><strong>To download virus sequence metadata:</strong> - Go to: <a href="https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide%5D">https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide</a> - Click: Download - Select: Current Table View Results -&gt; CSV format - Select: Download all Records - Click: on checkboxes for all columns - Click: Download</p>
+<p><strong>To download virus sequence metadata:</strong></p>
+<ul>
+<li>Go to: <a href="https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide%5D">https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide</a></li>
+<li>Click: Download</li>
+<li>Select: Current Table View Results -&gt; CSV format</li>
+<li>Select: Download all Records</li>
+<li>Click: on checkboxes for all columns</li>
+<li>Click: Download</li>
+</ul>
 <p>When I did this on Jan 4, 2022, I downloaded a 2.2 Gb comma separated value (csv) file named <code>sequences.csv</code> with 6.8M lines (one line per virus sequence)</p>
 <pre class="bash"><code>wc -l sequences.csv</code></pre>
 <pre><code>##  6811567 sequences.csv</code></pre>
@@ -1041,54 +1049,54 @@ printf(&quot;Although the mean number of viruses per virus species is %0.0f and 
 v_one_seq &lt;- filter(seqs_per_virus, seqs_per_virus == 1)
 v_one_seq[sample(nrow(v_one_seq), 20), ]</code></pre>
 <pre><code>## # A tibble: 20 × 4
-##    Species                             seqs_per_virus  rank cumulative_seqs
-##    &lt;chr&gt;                                        &lt;int&gt; &lt;int&gt;           &lt;int&gt;
-##  1 Gordonia phage MinecraftSteve                    1 22376         6155965
-##  2 Bahdevuvirus limadaptatum                        1 16732         6150321
-##  3 Bat astrovirus Tm/Guangxi/DX04/2007              1 16962         6150551
-##  4 Bat coronavirus BR98-12/BGR/2008                 1 17032         6150621
-##  5 Klebsiella phage KPN6                            1 24180         6157769
-##  6 Wenling rattails astrovirus 2                    1 35379         6168968
-##  7 Microplitis pennatulae bracovirus                1 25786         6159375
-##  8 Tilapia adomavirus 2                             1 34232         6167821
-##  9 Pseudomonas phage vB_Pci_PCMW57                  1 29824         6163413
-## 10 Pectobacterium phage Nobby_B3                    1 28197         6161786
-## 11 Vibrio phage LP.1                                1 34942         6168531
-## 12 Bat astrovirus Tm/Guangxi/DX17/2007              1 16964         6150553
-## 13 Paramyxovirus bat/GH1a/2009                      1 27942         6161531
-## 14 Anolis sagrei adenovirus 7                       1 15763         6149352
-## 15 Rodent Paramyxovirus MpR12-06                    1 30878         6164467
-## 16 Tortoise paramyxovirus                           1 34319         6167908
-## 17 Cyanophage 143007                                1 19352         6152941
-## 18 Salmonella phage vB_Sen-E22                      1 31437         6165026
-## 19 Paramyxovirus PREDICT_PMV-163                    1 28017         6161606
-## 20 Nocardia phage NOC3                              1 27490         6161079</code></pre>
+##    Species                                  seqs_per_virus  rank cumulative_seqs
+##    &lt;chr&gt;                                             &lt;int&gt; &lt;int&gt;           &lt;int&gt;
+##  1 Pestivirus Giraffe-1                                  1 28332         6161921
+##  2 Adenovirus PREDICT_AdV-81                             1 15400         6148989
+##  3 Klebsiella phage KpnM6E1                              1 24181         6157770
+##  4 Hubei partiti-like virus 44                           1 23249         6156838
+##  5 Wenling crossorhombus astrovirus 2                    1 35329         6168918
+##  6 Tomato yellow blotch virus                            1 34274         6167863
+##  7 Gordonia phage Nina                                   1 22396         6155985
+##  8 Microbacterium phage Vitas                            1 25717         6159306
+##  9 Pika astrovirus Ot/FG164/Yunnan                       1 28732         6162321
+## 10 Streptococcus phage Javan633                          1 33138         6166727
+## 11 Jingmen birna-like virus                              1 23836         6157425
+## 12 Picobirnavirus monkey/CHN-56/2002                     1 28589         6162178
+## 13 Tomato begomovirus T217L                              1 34257         6167846
+## 14 Streptococcus satellite phage Javan753                1 33690         6167279
+## 15 Alphacoronavirus UKMa1                                1 15664         6149253
+## 16 Escherichia phage skuden                              1 21169         6154758
+## 17 Wenzhou Rattus norvegicus jeilongvirus 1              1 35440         6169029
+## 18 Staphylococcus phage HSA30                            1 32311         6165900
+## 19 Escherichia phage U115                                1 21205         6154794
+## 20 Sanya polycipivirus 1                                 1 31574         6165163</code></pre>
 <pre class="r"><code># hosts with one virus sequence
 h_one_seq &lt;- filter(seqs_per_host, seqs_per_host == 1)
 h_one_seq[sample(nrow(h_one_seq), 20), ]</code></pre>
 <pre><code>## # A tibble: 20 × 4
 ##    host_taxid seqs_per_host  rank cumulative_seqs
 ##    &lt;chr&gt;              &lt;int&gt; &lt;int&gt;           &lt;int&gt;
-##  1 2486279                1  7046         6168094
-##  2 313960                 1  7253         6168301
-##  3 45798                  1  7595         6168643
-##  4 140999                 1  6535         6167583
-##  5 74648                  1  8059         6169107
-##  6 587753                 1  7848         6168896
-##  7 269658                 1  7105         6168153
-##  8 400065                 1  7461         6168509
-##  9 1615896                1  6674         6167722
-## 10 1075374                1  6314         6167362
-## 11 38041                  1  7421         6168469
-## 12 81766                  1  8133         6169181
-## 13 1898836                1  6842         6167890
-## 14 3528                   1  7345         6168393
-## 15 1115866                1  6336         6167384
-## 16 184715                 1  6806         6167854
-## 17 59340                  1  7857         6168905
-## 18 373844                 1  7403         6168451
-## 19 37965                  1  7419         6168467
-## 20 2042057                1  6904         6167952</code></pre>
+##  1 53323                  1  7748         6168796
+##  2 41066                  1  7486         6168534
+##  3 9453                   1  8275         6169323
+##  4 76709                  1  8084         6169132
+##  5 1125                   1  6343         6167391
+##  6 369654                 1  7387         6168435
+##  7 1089802                1  6323         6167371
+##  8 2147                   1  6949         6167997
+##  9 4454                   1  7568         6168616
+## 10 1041208                1  6294         6167342
+## 11 208206                 1  6920         6167968
+## 12 59814                  1  7869         6168917
+## 13 119403                 1  6397         6167445
+## 14 52471                  1  7733         6168781
+## 15 765959                 1  8081         6169129
+## 16 82762                  1  8150         6169198
+## 17 58645                  1  7842         6168890
+## 18 8706                   1  8199         6169247
+## 19 145752                 1  6563         6167611
+## 20 20400                  1  6901         6167949</code></pre>
 </div>
 <div id="what-fraction-of-hosts-have-assigned-virus-sequences" class="section level3">
 <h3>What fraction of hosts have assigned virus sequences?</h3>

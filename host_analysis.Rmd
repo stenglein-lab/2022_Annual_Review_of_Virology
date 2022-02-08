@@ -22,12 +22,13 @@ Below are the steps I took to download this metadata.  This produced a file of 2
 If you want to reproduce or update this analysis, you will have to follow these steps to download a copy of this metadata for yourself.
 
 **To download virus sequence metadata:**
-- Go to: [https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide])
-- Click: Download
-- Select: Current Table View Results -> CSV format
-- Select: Download all Records
-- Click: on checkboxes for all columns
-- Click: Download
+
+* Go to: [https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide])
+* Click: Download
+* Select: Current Table View Results -> CSV format
+* Select: Download all Records
+* Click: on checkboxes for all columns
+* Click: Download
 
 When I did this on Jan 4, 2022, I downloaded a 2.2 Gb comma separated value (csv) file named `sequences.csv` with 6.8M lines (one line per virus sequence) 
 
