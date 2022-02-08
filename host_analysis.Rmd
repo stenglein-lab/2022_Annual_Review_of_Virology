@@ -1,0 +1,647 @@
+---
+title: "Virus_sequences_per_virus_and_host"
+author: "Mark Stenglein"
+date: "1/4/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+This documents an analysis of the number of virus sequences per viral taxon and per host taxon.  I undertook this analysis because I was interested in quantifying the extent to which virology has focused on certain hosts and viruses.  This analysis is described in a review article published in [Annual Review of Virology](https://www.annualreviews.org/journal/virology).
+
+
+### Obtain virus sequence metadata 
+
+[NCBI Virus](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/) is "is a community portal for viral sequence data".  It is described in [this paper](https://pubmed.ncbi.nlm.nih.gov/27899678/).  Through this portal it is possible to download virus sequences or metadata about virus sequences.  I downloaded all available metadata for all available virus nucleotide sequences.
+
+Below are the steps I took to download this metadata.  This produced a file of 2.2 Gb, which is too large to upload to the [GitHub repository](https://github.com/stenglein-lab/2022_Annual_Review_of_Virology) for this analysis.  
+If you want to reproduce or update this analysis, you will have to follow these steps to download a copy of this metadata for yourself.
+
+**To download virus sequence metadata:**
+- Go to: [https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide](https://www.ncbi.nlm.nih.gov/labs/virus/vssi/#/virus?SeqType_s=Nucleotide])
+- Click: Download
+- Select: Current Table View Results -> CSV format
+- Select: Download all Records
+- Click: on checkboxes for all columns
+- Click: Download
+
+When I did this on Jan 4, 2022, I downloaded a 2.2 Gb comma separated value (csv) file named `sequences.csv` with 6.8M lines (one line per virus sequence) 
+
+```{bash}
+wc -l sequences.csv
+```
+
+Get a checksum
+```{bash}
+md5 sequences.csv 
+```
+
+
+List file
+```{bash}
+ls -l sequences.csv 
+```
+
+
+### Load R packages
+ 
+```{r, message=FALSE}
+# load R libraries
+# if these aren't installed, you will need to install them using install.packages()
+library(tidyverse)
+library(taxizedb)
+library(taxize)
+library(patchwork)
+
+# dump all session information in the interest of reproducibility
+sessionInfo()
+```
+
+### Read in the metadata
+
+```{r}
+# read in the csv of virus sequence info from NCBI Virus
+df <- read.csv("sequences.csv", stringsAsFactors = F, strip.white = T)
+
+# how many sequences are there?
+virus_sequences <- nrow(df)
+
+print(paste0("There is metadata for: ", virus_sequences, " virus sequences."))
+```
+
+
+###  Download NCBI taxonomy info
+
+This analysis takes advantage of a couple really nice R packages that allow you to interact with the NCBI Taxonomy database (and other taxonomy resources).  These are the [taxize](https://docs.ropensci.org/taxize/) and [taxizedb](https://docs.ropensci.org/taxizedb/) [R packages](https://taxize.dev/).  Both of these were authored by Scott Chamberlain and colleagues.  The main difference between the two packages is that taxizedb downloads a local copy of databases whereas taxize uses web queries to get at the data.  taxizedb uses up more space on your hard drives but is faster after an initial download: web queries to NCBI are throttled to 10 per second, for example. taxizedb is not quite as fully featured as taxize, though, so this analysis uses both packages.
+
+### Download local copy of NCBI Taxonomy database
+
+The code chunk below downloads a local copy of the NCBI taxonomy database and puts it in a sqlite database.  If you've not done this before, this will take a while to download.  If you have downloaded it previously, this function will just return the path to the local NCBI database because overwrite is set to FALSE. If you want to update the database to the newest available version change overwrite to TRUE.
+
+```{r}
+ncbi_tax_db <- db_download_ncbi(verbose = TRUE, overwrite = FALSE)
+```
+
+### How long would a book have to be now to hold all of the available virus sequences?
+
+This code block produces text that is part of the caption for Figure 2 in the review article.  
+
+```{r}
+# how many bases of virus sequences?
+# sum all of the sequence lengths 
+bases_of_virus_sequence <- df %>% summarize(bases = sum(Length)) %>% pull(bases)
+
+# This estimate is based on the number of bases of sequence displayed per page in the 1985 Nucleotide Sequences book I have. 
+bases_per_book_page <- 3000
+
+# define a printf helper function
+printf <- function(...) invisible(print(sprintf(...)))
+
+# make sentence for paper:
+printf("Now, the %0.1e bases of virus sequence would need a book %0.0f million pages long to fit all of the virus sequences.", 
+                      bases_of_virus_sequence, (bases_of_virus_sequence / bases_per_book_page / 1e6 ))
+```
+
+
+### How many of the sequences have an annotated host? 
+
+Not all sequences have an annotated host.  
+
+```{r}
+# only keep records with annotated host information
+df_host <- filter(df, str_length(Host) > 0)
+
+# calculate fraction of sequences with host annotation
+num_seqs_with_host = nrow(df_host)
+pct_seqs_with_host = (num_seqs_with_host / virus_sequences) * 100
+
+# output text for paper
+printf("for instance, only %0.1e of the %0.1e viral sequences (%0.0f%%) have an annotated host", nrow(df_host), nrow(df), pct_seqs_with_host)
+```
+
+
+### Get latin binomials for host taxa
+
+The host annotation associated with virus sequences in NCBI is not all that standardized. Basically, it's whatever the sequence depositors decided to label the host as.  I will try to be as systematic as possible by using the first two words of the host annotation field, with the assumption that for most sequences this corresponds to the host Latin binomial (e.g. Homo sapiens).
+
+Not all host annotations are a latin binomial.  Some are higher order taxa. For instance some virus sequences are assigned to higher order taxa (if, for instance, they are from a pool of related organisms as in Genbank record KX884152, the host of which is Diptera).  Some host names have changed over time.  So there is some uncertainty associated with assigning hosts to virus sequences. 
+
+But one nice thing about taxize and the NCBI database is that it is possible to use host synonyms (human is a synonym of Homo sapiens), and for this anlaysis it'll be OK to assign to higher order taxa: we will just count each higher order taxon as one of all the host taxa.
+
+```{r}
+# pull out host binomial name, assumed to be the first and second words of host name
+df_host_binomial_df <-  as.data.frame(str_extract_all(df_host$Host, "\\S+", simplify = T)[,1:2])
+df_host$binomial   <- df_host_binomial_df %>% mutate(host_binomial = str_trim(paste(V1, V2, sep=" "))) %>% pull(host_binomial)
+
+# now need to map host genus name to the NCBI taxonomic tree
+# collect all the unique binomials
+df_binomial <- df_host %>% group_by(binomial) %>% summarize()
+
+# convert binomial names to taxids using taxizedb name2taxid function
+# this function will deal with old names and taxon synonyms, like human -> Homo sapiens
+df_binomial_taxid <- taxizedb::name2taxid(df_binomial$binomial, out_type="summary")
+
+# output the top of this table
+head(df_binomial_taxid)
+```
+
+### Deal with ambiuous host names
+
+name2taxid() does not necessarily return a single taxid for each name.  Any name that produces >1 taxid is ambiguous.  We need to deal with those.
+
+A common reason this happens is when a genus and subgenus have the same name. For example, Aedes is both a genus and subgenus of mosquito. name2taxid() returns taxids for *both* the genus and subgenus.
+
+In other cases, taxon names are just ambiguous, sometimes even from different kingdoms. As an example, Alpinia is both a genus of beetle and of plant.
+
+The way we will deal with these ambiguous taxids is to assign the sequence to the lowest common ancestor (LCA) of the taxids for that name.  For instance, the name "Aedes" will return taxids 149531 (the subgenus Aedes) and 7158 (the genus Aedes).  The LCA of these is the genus Aedes, taxid 7158.
+
+In more ambguous cases (e.g. Alpinia), the LCA may be near the root of the taxonomic tree and so not that useful. 
+
+```{r}
+# pull out any taxon names that were ambiguous, i.e. that had >1 taxid assigned
+df_ambig <- df_binomial_taxid %>% group_by(name) %>% filter(n() > 1)
+
+# collapse rows from an ambiguous name -> taxid conversion
+# and only keep a lowest common ancestor taxid
+#
+# note that if you want this to run faster, you should set your ENTREZ_KEY R environmental variable
+# If this is not set, taxize will issue warnings if not and your queries will be more throttled
+# 
+# do this by commenting out and running the command below.  
+# Sys.setenv(ENTREZ_KEY = "Your-NCBI_API_token")
+# or putting your NCBI entrey key in in a .Renviron file in your home directory
+
+# this function uses the taxize::lowest_common function to identify taxonomic lowest common ancestor 
+# for a set of taxids in a way that is compatible with group_modify() below
+
+# turn off noisy taxize output
+taxize_options(taxon_state_messages = F, quiet=T)
+
+# have to use taxize we queries and not taxizedb local queries because taxizedb doesn't have lowest_common function.
+# 
+return_lca <- function (x,y) {
+  ids <- as.integer(x$id)
+  lca <- taxize::lowest_common(ids, db="ncbi")
+  new_row = data.frame(id = lca$id)
+  # throttle to 10 per second to comply with NCBI query rate limit
+  Sys.sleep(0.1)
+  new_row
+}
+
+# determine lca for all ambiguous taxon names
+
+# group_modify is a cool/funky dplyr function.  It takes a grouped dataframe and runs a function on the 
+# subset of the dataframe for each group, and returns a dataframe.  For more info, see:
+# https://dplyr.tidyverse.org/reference/group_map.html
+#
+# Here, we will group by name (so names with multiple taxids will form one group)
+# and the return_lca function will return a single row for each of these multi-row
+# groups that has the name and LCA taxid.
+df_lca <- df_ambig %>% group_by(name) %>% group_modify(~ return_lca(.x))  
+df_lca <- df_lca %>% ungroup()
+
+# these are the host taxa names that were unambiguously assigned to taxids
+df_no_ambig <- df_binomial_taxid %>% group_by(name) %>% filter(n() == 1) %>% ungroup()
+
+# concatenate unambigious taxon names plus de-ambiguated ones
+df_taxid <- rbind(df_no_ambig, df_lca)
+
+# give these taxids "official" taxon names from the host taxid
+df_taxid <- df_taxid %>% mutate(host_taxon_name = taxizedb::taxid2name(id))
+
+# merge in host taxon data to the big df
+df_host <- left_join(df_host, df_taxid, by=c("binomial" = "name")) 
+
+# rename id column -> host_taxid
+df_host <- df_host %>% rename(host_taxid = id)
+
+# show solume colums from the first rows
+head(select(df_host, Accession, Species, Host, host_taxid))
+```
+
+
+### Get virus taxon information
+
+Now we will get information about virus sequences species (or higher order taxon).  Virus species names are systematically linked to Taxonomy taxids, so this is more straightforward then host annotation to taxid coversions.
+
+```{r}
+# -------------------------
+# get virus species taxids
+# -------------------------
+
+# get all of the unique viral taxa
+df_unique_virus_spp <- df_host %>% group_by(Species) %>% summarize()
+
+# convert these into taxids
+df_virus_taxid <- taxizedb::name2taxid(df_unique_virus_spp$Species, out_type="summary")
+
+# these *should* be unambiguously assigned
+df_virus_ambig <- df_virus_taxid %>% group_by(name) %>% summarize(n=n()) %>% filter(n > 1)
+if (nrow(df_virus_ambig) > 0) {
+  message("Error: some virus species name were ambiguously assigned")
+  message(head(df_virus_ambig))
+  stop("Exiting...")
+}
+  
+# rename the column that has virus taxid
+df_virus_taxid <- df_virus_taxid %>% rename(virus_taxid = id)
+
+# merge in virus taxid column
+df_host <- left_join(df_host, df_virus_taxid, by=(c("Species" = "name")))
+
+# show solume colums from the first rows
+head(select(df_host, Accession, Species, virus_taxid))
+```
+
+## Output tables
+
+### Table of sequences per host 
+
+OK, now we have the data in the format we want.  Let's output some tables
+
+```{r, message=FALSE}
+# ---------------------------------------------------
+# Output info on hosts with most sequenced viruses
+# ---------------------------------------------------
+
+output_seqs_per_host <- function(df_host, filename, number_to_output)  {
+
+  # calculate sequences per host taxon and arrange in descending order
+  seqs_per_host <- df_host %>% 
+    group_by(host_taxon_name) %>% 
+    summarize(seqs_per_host = n(), .groups="drop") %>% 
+    arrange(-seqs_per_host) %>%
+    # calculate rank (order) and fraction of all sequences
+    mutate(rank = row_number(), 
+           fraction_seqs = seqs_per_host / nrow(df_host), 
+	   cumulative_fraction_seqs = cumsum(fraction_seqs))
+  
+  # prepare a table for output
+  # only keep top rows
+  hosts_for_output <- head(seqs_per_host, number_to_output)
+  
+  # collect common names for hosts using the taxize sci2comm function (not available in taxizedb)
+  # I don't know how to surpress status messages from sci2comm: taxize_options() doesn't work
+  common_names_list <- taxize::sci2comm(hosts_for_output$host_taxon_name, db='ncbi')
+  
+  # convert list to dataframe and rename columns
+  common_names <- as.data.frame(do.call(rbind,common_names_list))
+  common_names <- common_names %>% mutate(host_taxon_name = row.names(common_names), common_name = V1) %>% select(-V1)
+  row.names(common_names) <- NULL
+  
+  # merge in common names
+  hosts_for_output <- left_join(hosts_for_output, common_names)
+  
+  # reformat output
+  hosts_for_output <- 
+    hosts_for_output %>% 
+    mutate(k_virus_seqs = sprintf("%0.1f", seqs_per_host/1000),
+           pct_seqs = sprintf("%0.1f", fraction_seqs * 100),
+           cumulative_pct = sprintf("%0.1f", cumulative_fraction_seqs * 100)) %>% 
+    select(host_taxon_name, common_name, k_virus_seqs, pct_seqs, cumulative_pct)
+  
+  # write out a text file
+  write.table(hosts_for_output, filename, quote=F, sep="\t", row.names=F)
+  
+  # return the table 
+  hosts_for_output
+}
+```
+
+```{r message=FALSE, warning=FALSE, results="hide"}
+# Do this this way, with this call in a separate code block
+# because taxize::sci2comm produces really long and not-turnoffable
+# status messages, so run this in a output-supressed code block
+# so those messages don't show up in knit output
+host_tab <- output_seqs_per_host(df_host, "top_virus_hosts.txt", 20)
+```
+
+```{r}
+host_tab
+```
+
+### Output tables of most-sequenced viruses
+
+```{r}
+# ----------------------------------------
+# Output info on most-sequenced viruses
+# ----------------------------------------
+
+# tabulate virus info
+
+# count # of sequences per virus taxon
+# arrange in descending order
+# calculate fractional counts
+output_seqs_per_virus <- function(df_host, filename, number_to_output) {
+  seqs_per_virus <- df_host %>% 
+    group_by(Species) %>% 
+    summarize(seqs_per_virus = n(), .groups="drop") %>% 
+    arrange(-seqs_per_virus) %>%
+    mutate(rank = row_number(), 
+           fraction_seqs = seqs_per_virus / nrow(df_host), 
+           cumulative_fraction_seqs = cumsum(fraction_seqs))
+  
+  # prepare a table for output
+  viruses_for_output <- head(seqs_per_virus, number_to_output)
+  
+  # reformat output
+  viruses_for_output <- 
+    viruses_for_output %>% 
+    mutate(k_virus_seqs = sprintf("%0.1f", seqs_per_virus/1000),
+           pct_seqs = sprintf("%0.1f", fraction_seqs * 100),
+           cumulative_pct = sprintf("%0.1f", cumulative_fraction_seqs * 100)) %>% 
+    select(Species, k_virus_seqs, pct_seqs, cumulative_pct)
+  
+  # write out a text file
+  write.table(viruses_for_output, filename, quote=F, sep="\t", row.names=F)
+  
+  #output here too
+  viruses_for_output
+}
+
+output_seqs_per_virus(df_host, "top_viruses.txt", 20)
+```
+
+### Remove most-sequenced pandemic viruses
+
+Pandemic viruses account for the most-sequenced viruses.  What if we remove them from analysis?  I will remove sequences from sarbecoviruses, lentiviruses, and influenza viruses and make simlar tables.
+
+```{r}
+# ------------------------------------------------------
+# Remove most-sequenced viruses and analyze remaining
+# -----------------------------------------------------
+
+# Do this analysis but without sarbecovirus, orthomyxovirus, or lentivirus sequences
+
+# Manually looked up taxids for these genera
+
+sarbecovirus_taxid <- 2509511
+# alpha, beta, gamma, deltainfluenza virus taxids
+influenzavirus_taxids <- c(197911, 197912, 197913, 1511083)
+lentivirus_taxid <- 11646
+
+parental_taxids_to_filter <- c(sarbecovirus_taxid, influenzavirus_taxids, lentivirus_taxid)
+
+# get all taxa downstream of these parent taxids as well.  
+# So we can filter out any sequence that comes from any of these parent taxids or any of their child taxids.
+downstream_taxids <- taxizedb::downstream(parental_taxids_to_filter)
+
+# downstream returns a somewhat complicated list data structure
+# with list elements named by the original query taxids
+# and then each of them having childtaxa_id elements
+# that are character vectors of all the downstream child taxids
+# 
+# need this function to get those downstream taxids out of that structure
+get_child_taxids <- function(x) {
+  x$childtaxa_id
+}
+
+# this will be a long list of all parent and downstream taxids that we will remove
+taxids_to_filter <- unlist(lapply(downstream_taxids, get_child_taxids), use.names = F)
+
+# concatenate child and parental taxids in case any sequences annotated to host at the parental (genus) level
+taxids_to_filter <- c(taxids_to_filter, parental_taxids_to_filter)
+
+# filter out any virus from any of those taxids
+df_host_filtered <- df_host %>% filter(!(virus_taxid %in% taxids_to_filter))
+
+# how many sequences remaining (%)?
+frac_after_filtering_pandemic_viruses <- nrow(df_host_filtered) / nrow(df_host)
+pct_pandemic_virus_sequences = (1-frac_after_filtering_pandemic_viruses) * 100
+
+# output text for paper
+printf(paste0("Together, sequences from sarbecoviruses (SARS-CoV-2 and related viruses), ",
+              "lentiviruses (HIV and related viruses), and influenza viruses account for ",
+              "%0.1f%% of all virus sequences."),  pct_pandemic_virus_sequences)
+```
+
+### Output tables with pandemic virus sequences removed
+
+```{r message=FALSE, warning=FALSE, results="hide"}
+# output tables as above 
+host_tab_no_pandemic <- output_seqs_per_host(df_host_filtered, "top_viruses_hosts_filtered.txt", 20)
+```
+
+```{r}
+host_tab_no_pandemic
+```
+
+
+```{r}
+output_seqs_per_virus(df_host_filtered, "top_viruses_filtered.txt", 20)
+```
+
+### Make plots
+
+Now going to cumulative distribution graphs of virus sequences vs. viral and host taxa (Figure 1 of review article).
+
+```{r}
+# -------------------------------------------------------
+# Plot cumulative curves for virus sequences per species
+# -------------------------------------------------------
+
+# the code below makes 4 data frames with hosts and viruses ordered by their # of virus sequences and with a column
+# that contains the cumulative # of virus sequences
+#
+# do this for all virus sequences and with pandemic sequences removed.
+seqs_per_virus <- df_host %>% group_by(Species) %>% summarize(seqs_per_virus = n(), .groups="drop") %>% arrange(-seqs_per_virus) %>%
+  mutate(rank = row_number(), cumulative_seqs = cumsum(seqs_per_virus))
+
+seqs_per_virus_filtered <- df_host_filtered %>% group_by(Species) %>% summarize(seqs_per_virus = n(), .groups="drop") %>% arrange(-seqs_per_virus) %>%
+  mutate(rank = row_number(), cumulative_seqs = cumsum(seqs_per_virus))
+
+seqs_per_host <- df_host %>% group_by(host_taxid) %>% summarize(seqs_per_host = n(), .groups="drop") %>% arrange(-seqs_per_host) %>%
+  mutate(rank = row_number(), cumulative_seqs = cumsum(seqs_per_host))
+
+seqs_per_host_filtered <- df_host_filtered %>% group_by(host_taxid) %>% summarize(seqs_per_host = n(), .groups="drop") %>% arrange(-seqs_per_host) %>%
+  mutate(rank = row_number(), cumulative_seqs = cumsum(seqs_per_host))
+
+# make artificial zero points for plots (start plots at the origins)
+zero_point_virus <- data.frame("StandIn", 0, 0, 0, stringsAsFactors=FALSE)
+colnames(zero_point_virus) <- colnames(seqs_per_virus)
+
+zero_point_host <- data.frame("StandIn", 0, 0, 0, stringsAsFactors=FALSE)
+colnames(zero_point_host) <- colnames(seqs_per_host)
+
+# merge in zero points
+spv_plot <- rbind(zero_point_virus, seqs_per_virus) 
+spvf_plot <- rbind(zero_point_virus, seqs_per_virus_filtered) 
+
+sph_plot <- rbind(zero_point_host, seqs_per_host) 
+sphf_plot <- rbind(zero_point_host, seqs_per_host_filtered) 
+
+# fancy colors popular in 2022
+skydiver <- rgb(31/255, 96/255, 158/255)
+daffodil <- rgb(255/255, 199/255, 82/255)
+glacier_lake <- rgb(132/255, 165/255, 188/255)
+
+# Make the virus cumulative distribution plot
+v_curve_p <- ggplot() +
+  geom_line(data=spvf_plot, mapping=aes(x=rank, y=cumulative_seqs), size=1.5, color=daffodil) +
+  geom_line(data=spv_plot, mapping=aes(x=rank, y=cumulative_seqs), size=1.5, color=skydiver) +
+  # geom_area(data=spv_plot, mapping=aes(x=rank, y=cumulative_seqs), fill=skydiver, alpha=0.5) +
+  # geom_area(data=spvf_plot, mapping=aes(x=rank, y=cumulative_seqs), fill=daffodil, alpha=0.5) +
+  xlab("Virus species ordered by number of sequences") +
+  ylab("Cumulative virus sequences") +
+  theme_classic(base_size = 10)
+
+v_curve_p
+```
+
+```{r}
+# histogram of sequences per virus taxa
+v_histo_p <- ggplot() +
+  geom_histogram(data=spv_plot, mapping=aes(x=seqs_per_virus), bins=40, fill=skydiver, color="black", size=0.25) +
+  xlab("Sequences per virus species") +
+  ylab("Virus species") +
+  # scale_y_log10() + 
+  xlim(c(0,40)) +
+  theme_classic(base_size = 10)
+
+v_histo_p
+```
+
+```{r}
+# host cumulative distribution plot
+h_curve_p <- ggplot() +
+  geom_line(data=sphf_plot, mapping=aes(x=rank, y=cumulative_seqs), size=1.5, color=daffodil) +
+  geom_line(data=sph_plot, mapping=aes(x=rank, y=cumulative_seqs), size=1.5, color=skydiver) +
+  # geom_area(data=sph_plot, mapping=aes(x=rank, y=cumulative_seqs), fill=skydiver, alpha=0.5) +
+  # geom_area(data=sphf_plot, mapping=aes(x=rank, y=cumulative_seqs), fill=daffodil, alpha=0.5) +
+  xlab("Hosts ordered by number of virus sequences") +
+  ylab("Cumulative virus sequences") +
+  theme_classic(base_size = 10)
+
+h_curve_p
+```
+
+```{r}
+# viruses per host histogram
+h_histo_p <- ggplot() +
+  geom_histogram(data=seqs_per_host, mapping=aes(x=seqs_per_host), bins=40, fill=skydiver, color="black", size=0.25) +
+  xlab("Virus sequences per host") +
+  ylab("Hosts") +
+  # scale_y_log10() + 
+  xlim(c(0,40)) +
+  theme_classic(base_size = 10)
+
+h_histo_p
+```
+
+
+```{r}
+# combine the plots into one 4-panel plot and save as a PDF
+combined_p <- v_curve_p + v_histo_p + h_curve_p + h_histo_p
+
+ggsave("Fig_1.pdf", combined_p, width=7.5, height=6, units="in", dpi=300)
+
+combined_p
+```
+
+
+
+### Calculate info about how many viruses and hosts are represented by only a single host
+
+Output text about how many virus species and hosts
+```{r}
+printf("In other words, at the same time that a few viruses account for most sequences, there are sequences from thousands of different viruses and hosts (%0.0f viral taxa and %0.0f hosts).",
+       nrow(seqs_per_virus), nrow(seqs_per_host))
+```
+
+```{r}
+# How many viruses or host have only a single virus sequence?
+n_viruses_with_one_seq <- nrow(filter(seqs_per_virus, seqs_per_virus == 1))
+f_viruses_with_one_seq <- n_viruses_with_one_seq / nrow(seqs_per_virus)
+n_hosts_with_one_seq <- nrow(filter(seqs_per_host, seqs_per_host == 1))
+f_hosts_with_one_seq <- n_hosts_with_one_seq / nrow(seqs_per_host)
+
+# output text for paper
+printf("The majority of viral taxa (%0.0f, %0.0f%%) are represented by a single sequence", n_viruses_with_one_seq, f_viruses_with_one_seq * 100)
+```
+
+
+Calculate mean and median values:
+
+```{r}
+# summary stats for viruses per spp and host
+mean_v_per_v <- seqs_per_virus %>% summarize(mean = mean(seqs_per_virus)) %>% pull(mean)
+median_v_per_v <- seqs_per_virus %>% summarize(median = median(seqs_per_virus)) %>% pull(median)
+
+mean_v_per_h <- seqs_per_host %>% summarize(mean = mean(seqs_per_host)) %>% pull(mean)
+median_v_per_h <- seqs_per_host %>% summarize(median = median(seqs_per_host)) %>% pull(median)
+
+# make some text for paper
+printf("Although the mean number of viruses per virus species is %0.0f and the mean number of viruses per host is %0.0f, the median values are only %0.0f sequence per virus and %0.0f per host.", mean_v_per_v, mean_v_per_h, median_v_per_v, median_v_per_h)
+```
+
+### Identify random single-sequence hosts or viruses
+
+Use the sample() function in R to pull out a random set of viruses or hosts with only one sequence.  Every time you run this code it will produce a different random subset.
+
+```{r}
+# pull out some random examples of viruses and hosts with just one sequecne
+
+v_one_seq <- filter(seqs_per_virus, seqs_per_virus == 1)
+v_one_seq[sample(nrow(v_one_seq), 20), ]
+```
+
+```{r}
+# hosts with one virus sequence
+h_one_seq <- filter(seqs_per_host, seqs_per_host == 1)
+h_one_seq[sample(nrow(h_one_seq), 20), ]
+```
+
+
+### What fraction of hosts have assigned virus sequences?
+
+```{r}
+# how many species of cellular organisms in the NCBI taxonomy?
+# 131567 is the taxid for cellular organisms.  Archae, Bacteria, and Eukaryotes are children of this taxon.
+cellular_species <- taxizedb::downstream(131567, downto='species')
+n_cellular_spp <- nrow(cellular_species$`131567`)
+
+# estimate of fraction of species diversity captubred by NCBI Taxonomy database.
+# this estimate is listed on the NCBI Taxonomy homepage.
+pct_diversity_represented <- 10
+
+# how many species of viruses in the NCBI taxonomy?
+virus_species <- taxizedb::downstream(10239, downto='species')
+n_virus_spp <- nrow(virus_species$`10239`)
+virus_sp_df <- virus_species$'10239'
+
+pct_hosts_with_virus <- 100 * nrow(seqs_per_host) / n_cellular_spp / pct_diversity_represented
+
+printf("There are records for %0.0f species of cellular life in the NCBI Taxonomy database. This captures only a small fraction — perhaps %0.0f%% — of actual species diversity, meaning that virus sequences have been described for only something like %0.1f%% of hosts (%0.0f/%0.0f/%0.0f).", 
+       n_cellular_spp, 
+       pct_diversity_represented, 
+       pct_hosts_with_virus,
+       nrow(seqs_per_host),
+       n_cellular_spp,
+       (100/pct_diversity_represented))
+       
+```
+
+
+
+### Some content not in paper
+
+You could extent this analysis in a number of ways.  For instance, you could break out the # of sequences per virus/host combo:
+
+### Split data by virus / host combinations
+
+Order the data by virus-host combinations.  
+
+So, for instance, influenza a virus sequences will be separated into different counts based on their hosts
+
+```{r}
+df_virus_species_and_host <- df_host %>% group_by(Species, host_taxon_name) %>% 
+  summarize(n_virus_seq = n(), 
+            .groups="drop") %>%
+  arrange(-n_virus_seq)
+
+head(df_virus_species_and_host, 100)
+```
